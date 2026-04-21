@@ -1,0 +1,22 @@
+# SpecStory / Cursor chat transcripts — local only
+.specstory/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build / logs
+build/
+dist/
+*.log
