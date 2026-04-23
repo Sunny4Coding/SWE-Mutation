@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swe-mutation"
+version = "0.1.0"
+description = "SWE-Mutation: agentic mutation framework and benchmark for evaluating LLM-generated test suites"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+authors = [
+  { name = "Yuxuan Sun",  email = "sunyuxuan@mail.ustc.edu.cn" },
+  { name = "Yuze Zhao" },
+  { name = "Yufeng Wang" },
+  { name = "Yao Du" },
+  { name = "Zhiyuan Ma" },
+  { name = "Jinbo Wang" },
+  { name = "Mengdi Zhang" },
+  { name = "Kai Zhang" },
+  { name = "Zhenya Huang" },
+]
+
+keywords = ["mutation testing", "test generation", "LLM", "software engineering", "benchmark"]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Software Development :: Testing",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+  # CLI & progress
+  "typer>=0.12",
+  "rich>=13.0",
+
+  # Config & data
+  "pyyaml>=6.0",
+  "datasets>=2.18",
+
+  # Agent framework (Mini-SWE-Agent)
+  "mini-swe-agent>=0.1",
+
+  # LLM providers
+  "anthropic>=0.28",
+
+  # SWE-bench harness (test specs, Docker images)
+  "swebench>=2.1",
+
+  # Tree-sitter AST parsing for all 10 benchmark languages
+  "tree-sitter-languages>=1.10",
+
+  # F2P execution trace via coverage instrumentation
+  "coverage>=7.0",
+]
+
+[project.optional-dependencies]
+# Statistical tests for RDR confidence intervals
+stats = ["scipy>=1.12"]
+
+# Rule-based mutation baseline
+rulebased = ["cosmic-ray>=8.3"]
+
+# All optional extras
+dev = ["scipy>=1.12", "cosmic-ray>=8.3"]
+
+[project.scripts]
+swe-mutation = "framework.mutation:app"
+swe-mutation-eval = "evaluation.evaluate:app"
+swe-mutation-fewshot = "framework.baselines.fewshot:app"
+swe-mutation-self-play = "framework.self_play:app"
+
+[project.urls]
+Homepage = "https://github.com/Sunny4Coding/SWE-Mutation"
+Paper    = "https://arxiv.org/abs/2026.xxxxx"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["framework*", "agents*", "evaluation*"]

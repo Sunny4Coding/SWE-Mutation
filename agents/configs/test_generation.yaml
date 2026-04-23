@@ -1,0 +1,137 @@
+agent:
+  system_template: |
+    You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.
+    Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
+
+    Include a THOUGHT section before your command where you explain your reasoning process.
+    Format your response as shown in <format_example>.
+
+    <format_example>
+    THOUGHT: Your reasoning and analysis here
+
+    ```bash
+    your_command_here
+    ```
+    </format_example>
+
+    Failure to follow these rules will cause your response to be rejected.
+  instance_template: |
+    <issue_description>
+    {{task}}
+    </issue_description>
+
+    <goal>
+    Your objective is to generate a complete test suite from scratch for the repository.
+    - Test files to be generated: {{test_files}}
+    - The test files have been cleared; you must create them from scratch
+    - Comprehensively cover the functionality described in the issue and related code
+    - The repository currently contains the bug described in the issue. It is expected and acceptable
+      that your tests fail against the current (buggy) code — your tests should be correct with
+      respect to the intended behavior, not the current implementation
+    - Your generated test code must be syntactically correct and free of compilation errors
+    </goal>
+
+    <instructions>
+    ## Overview
+    You are a software engineer with interactive shell access to a repository at /testbed.
+    Analyze the issue and codebase, then generate complete test files from scratch.
+
+    For each response:
+    1. Include a THOUGHT section explaining your reasoning
+    2. Provide exactly ONE bash command
+
+    ## Boundaries
+    - GENERATE: Complete test files in {{test_files}} from scratch
+    - EXPLORE: Source code to understand structure and functionality
+    - DO NOT MODIFY: Source code files, configuration files (pyproject.toml, setup.cfg, etc.)
+
+    ## Workflow
+    1. Analyze the issue to understand the feature or bug
+    2. Explore the codebase: project structure, existing tests, relevant modules
+    3. Generate complete test files using the appropriate testing framework for the language
+    4. Verify syntax correctness with the appropriate tool:
+       - Python: `python -m py_compile <file>`
+       - Java: `javac <file>`
+       - JavaScript/TypeScript: `node --check <file>` / `tsc --noEmit <file>`
+       - Go: `go build ./...`
+       - C/C++: `gcc -fsyntax-only <file>`
+       - Rust: `cargo check`
+    5. Confirm tests follow the project's existing conventions and patterns
+
+    ## Writing Large Files
+    For test files over ~200 lines, write incrementally:
+    1. Write header and imports first
+    2. Append test classes/methods one at a time using `cat >> file <<'EOF'`
+    3. Validate syntax after each major section
+    4. Always use quoted heredoc delimiters (`<<'EOF'`) to prevent variable expansion
+
+    ## Command Execution
+    - Each command runs in a new subshell; directory changes are not persistent
+    - Prefix with `cd /testbed &&` when working directory matters
+    - Use non-interactive flags (-y, -f) for package managers
+
+    ## Submission
+    When complete, verify syntax one final time, then submit:
+
+    ```bash
+    echo SWE_MUTATION_FINAL_OUTPUT && git add -A && git diff --cached
+    ```
+    </instructions>
+  action_observation_template: |
+    <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
+    <output>
+    {{ output.output -}}
+    </output>
+    {%- else -%}
+    <warning>
+    The output of your last command was too long.
+    Please try a different command that produces less output.
+    If you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.
+    If you're using grep or find and it produced too much output, you can use a more selective search pattern.
+    If you really need to see something from the full command's output, you can redirect output to a file and then search in that file.
+    </warning>
+    {%- set elided_chars = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided_chars>
+    {{ elided_chars }} characters elided
+    </elided_chars>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
+  format_error_template: |
+    Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
+
+    Please format your action in triple backticks as shown in <response_example>.
+
+    <response_example>
+    Here are some thoughts about why you want to perform the action.
+
+    ```bash
+    <action>
+    ```
+    </response_example>
+
+    If you have completed your assignment, please consult the first message about how to
+    submit your solution (you will not be able to continue working on this task after that).
+  step_limit: 100
+  cost_limit: 3.
+
+environment:
+  cwd: "/testbed"
+  timeout: 60
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+
+model:
+  model_name: "claude-sonnet-4-20250514"
+  model_kwargs:
+    temperature: 0.0
+    drop_params: true

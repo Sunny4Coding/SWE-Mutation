@@ -1,0 +1,134 @@
+agent:
+  system_template: |
+    You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.
+    Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
+
+    Include a THOUGHT section before your command where you explain your reasoning process.
+    Format your response as shown in <format_example>.
+
+    <format_example>
+    THOUGHT: Your reasoning and analysis here
+
+    ```bash
+    your_command_here
+    ```
+    </format_example>
+
+    Failure to follow these rules will cause your response to be rejected.
+  instance_template: |
+    <issue_description>
+    {{task}}
+    </issue_description>
+
+    <goal>
+    Your objective is to repair an existing test suite that is currently incomplete or flawed.
+    - Test files to be repaired: {{test_files}}
+    - The existing test suite fails to detect the bug described in the issue
+    - Repair the suite by adding new test functions or modifying existing ones
+    - A successful test suite must satisfy both conditions:
+      1. Reproduction: fails on the current (buggy) repository
+      2. Validity: passes on the fixed (golden) code
+    - A high-quality suite should be comprehensive enough to detect as many realistic
+      variants of the bug as possible
+    - Your modified test code must be syntactically correct and free of compilation errors
+    </goal>
+
+    <instructions>
+    ## Overview
+    You are a software engineer with interactive shell access to a repository at /testbed.
+    Analyze the issue and the existing test suite, then augment or fix it.
+
+    For each response:
+    1. Include a THOUGHT section explaining your reasoning
+    2. Provide exactly ONE bash command
+
+    ## Boundaries
+    - MODIFY: Test files in {{test_files}}, or create new test files alongside them
+    - EXPLORE: Source code to understand the bug and existing test patterns
+    - DO NOT MODIFY: Source code files, configuration files (pyproject.toml, setup.cfg, etc.)
+
+    ## Workflow
+    1. Analyze the issue to understand the specific bug or behavioral defect
+    2. Examine {{test_files}} to understand existing test structure and conventions
+    3. Identify what the existing tests miss — which inputs, edge cases, or code paths
+       are not exercised
+    4. Add or modify tests to cover the gap; prefer adding new test functions over
+       rewriting existing ones unless the existing ones are incorrect
+    5. Verify syntax correctness with the appropriate tool:
+       - Python: `python -m py_compile <file>`
+       - Java: `javac <file>`
+       - JavaScript/TypeScript: `node --check <file>` / `tsc --noEmit <file>`
+       - Go: `go build ./...`
+       - C/C++: `gcc -fsyntax-only <file>`
+       - Rust: `cargo check`
+
+    ## Command Execution
+    - Each command runs in a new subshell; directory changes are not persistent
+    - Prefix with `cd /testbed &&` when working directory matters
+    - Use non-interactive flags (-y, -f) for package managers
+
+    ## Submission
+    When complete, verify syntax one final time, then submit:
+
+    ```bash
+    echo SWE_MUTATION_FINAL_OUTPUT && git add -A && git diff --cached
+    ```
+    </instructions>
+  action_observation_template: |
+    <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
+    <output>
+    {{ output.output -}}
+    </output>
+    {%- else -%}
+    <warning>
+    The output of your last command was too long.
+    Please try a different command that produces less output.
+    If you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.
+    If you're using grep or find and it produced too much output, you can use a more selective search pattern.
+    If you really need to see something from the full command's output, you can redirect output to a file and then search in that file.
+    </warning>
+    {%- set elided_chars = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided_chars>
+    {{ elided_chars }} characters elided
+    </elided_chars>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
+  format_error_template: |
+    Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
+
+    Please format your action in triple backticks as shown in <response_example>.
+
+    <response_example>
+    Here are some thoughts about why you want to perform the action.
+
+    ```bash
+    <action>
+    ```
+    </response_example>
+
+    If you have completed your assignment, please consult the first message about how to
+    submit your solution (you will not be able to continue working on this task after that).
+  step_limit: 50
+  cost_limit: 3.
+
+environment:
+  cwd: "/testbed"
+  timeout: 60
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+
+model:
+  model_name: "claude-sonnet-4-20250514"
+  model_kwargs:
+    temperature: 0.0
+    drop_params: true

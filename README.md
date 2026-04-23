@@ -14,7 +14,7 @@
 
 This repository hosts the official code and data of **SWE-Mutation**, a repository-level benchmark that evaluates whether LLM-generated **test suites** are reliable and discriminative enough to be used as verification oracles for software engineering tasks. Instead of measuring a test suite against a single golden solution, SWE-Mutation confronts it with **systematically mutated** buggy solutions produced by an **agentic, language-agnostic mutation framework**, and asks: *how many realistic bugs can your tests actually catch?*
 
-> Code and data are **coming soon**. Star / watch the repository to get notified.
+> Benchmark data (**coming soon**). Code is available now. Star / watch the repository to be notified when data drops.
 
 ---
 
@@ -138,38 +138,86 @@ Average RDR drops from **71.04% → 39.81%** when switching from conventional mu
 
 Full results on SWE-Mutation-Multilingual (9 languages) and additional ablations are reported in the paper.
 
+> **Baseline implementations.** The **Rule-Based** baseline applies mutation operators from the [`cosmic-ray`](https://github.com/sixty-north/cosmic-ray) library to the files touched by the golden patch. The **Few-shot LLM** baseline calls the LLM once with in-context strategy examples and the source file content (truncated to fit the context window). Both baselines target 4 mutants per instance and share the same Judge validation step as our agentic framework. See [`framework/baselines/fewshot.py`](framework/baselines/fewshot.py) for the few-shot implementation; rule-based mutants can be generated with `cosmic-ray` directly (see `scripts/run_pipeline.sh`).
+
 ---
 
-## Repository Layout (planned)
-
-> **🚧 Coming Soon.** The codebase, evaluation harness and dataset are being refactored for public release. The planned layout is:
+## Repository Layout
 
 ```
 SWE-Mutation/
-├── data/                      # 🚧 coming soon — mutants, instance metadata, splits
-│   ├── swe_mutation/          #     Python split (500 instances, 1,664 mutants)
-│   └── swe_mutation_multi/    #     9-language split (300 instances, 972 mutants)
-├── framework/                 # 🚧 agentic mutation framework (Locate / Mutation / Judge / Self-Play)
-├── agents/                    # 🚧 adapters for Mini-SWE-Agent and Claude Code
-├── evaluation/                # 🚧 Pass@1 / VRR / RDR scorers, bootstrap + Wilcoxon
-├── scripts/                   # 🚧 reproduction scripts for tables in the paper
-└── docs/
+├── data/                              # 🚧 coming soon — benchmark splits
+│   ├── swe_mutation/                  #     Python split (500 instances, 1,664 mutants)
+│   └── swe_mutation_multi/            #     9-language split (300 instances, 972 mutants)
+│
+├── framework/                         # Agentic Mutation Framework
+│   ├── locate.py                      #   Locate module — Tree-sitter AST + F2P trace annotation
+│   ├── mutation.py                    #   Mutation + Judge modules — agentic bug injection & validation
+│   ├── self_play.py                   #   Self-Play module — discriminability-based candidate selection
+│   └── baselines/
+│       └── fewshot.py                 #   Few-shot LLM baseline (single-call, context-window-limited)
+│
+├── agents/
+│   └── configs/                       # Agent prompt configs (Mini-SWE-Agent format)
+│       ├── mutation.yaml              #   Mutation agent system + instance prompt
+│       ├── test_generation.yaml       #   Test generation task prompt
+│       └── test_repair.yaml           #   Test repair task prompt
+│
+├── evaluation/
+│   └── evaluate.py                    # Pass@1 / VRR / RDR scorer with bootstrap CI + Wilcoxon test
+│
+├── scripts/
+│   └── run_pipeline.sh                # End-to-end runner (generate mutants → evaluate)
+│
+└── pyproject.toml                     # Package metadata and dependencies
 ```
+
+**Baseline implementations** (for mutation strategy comparison, paper Table 5):
+- **Rule-based**: uses [`cosmic-ray`](https://github.com/sixty-north/cosmic-ray) mutation operators applied to golden-patch files. Install with `pip install cosmic-ray` and invoke via `run_pipeline.sh --mode rulebased_baseline`.
+- **Few-shot LLM**: `framework/baselines/fewshot.py` — single LLM call with five in-context strategy examples and truncated source file content (≤ 4 000 chars/file, ≤ 16 000 chars total).
 
 ---
 
 ## Quick Start
 
-> **🚧 Coming Soon.** Installation, dataset download, and evaluation commands will be documented here once the release is ready. The intended usage will look roughly like:
+### 1. Install
 
 ```bash
-# coming soon
-pip install swe-mutation
-swe-mutation evaluate \
-  --model claude-sonnet-4.5 \
-  --agent mini-swe-agent \
+git clone https://github.com/Sunny4Coding/SWE-Mutation
+cd SWE-Mutation
+pip install -e ".[dev]"
+```
+
+### 2. Generate mutants (agentic framework)
+
+```bash
+bash scripts/run_pipeline.sh \
+  --patches-file data/swe_mutation/instances.jsonl \
+  --model claude-sonnet-4-20250514 \
+  --mode generate_mutants \
+  --workers 4
+```
+
+### 3. Evaluate a model's test suites
+
+Run your model/agent on the test-generation or test-repair task first (producing a `preds.json`), then:
+
+```bash
+bash scripts/run_pipeline.sh \
+  --mode run_eval \
   --task test_repair \
-  --split python
+  --test-preds-file results/my_model/preds.json \
+  --mutants-file results/mutants/preds.json
+```
+
+### 4. Reproduce mutation-strategy ablation (Table 5)
+
+```bash
+# Few-shot baseline
+bash scripts/run_pipeline.sh --mode fewshot_baseline --workers 4
+
+# Rule-based baseline (requires cosmic-ray)
+bash scripts/run_pipeline.sh --mode rulebased_baseline
 ```
 
 ---
@@ -193,7 +241,7 @@ If you find SWE-Mutation useful for your research, please cite:
 
 ## Acknowledgements
 
-SWE-Mutation is built on top of [SWE-bench](https://github.com/princeton-nlp/SWE-bench), [SWE-bench Verified](https://openai.com/index/introducing-swe-bench-verified/) and [SWE-bench-Multilingual](https://github.com/SWE-bench/SWE-bench-Multilingual), and leverages [Mini-SWE-Agent](https://github.com/SWE-agent/mini-SWE-agent) and Claude Code as agentic scaffolds. We thank their authors for open-sourcing these resources.
+SWE-Mutation is built on top of [SWE-bench](https://github.com/princeton-nlp/SWE-bench), [SWE-bench Verified](https://openai.com/index/introducing-swe-bench-verified/) and [SWE-bench-Multilingual](https://github.com/SWE-bench/SWE-bench-Multilingual), and leverages [Mini-SWE-Agent](https://github.com/SWE-agent/mini-SWE-agent) and Claude Code as agentic scaffolds. The rule-based mutation baseline uses [cosmic-ray](https://github.com/sixty-north/cosmic-ray). We thank their authors for open-sourcing these resources.
 
 ---
 

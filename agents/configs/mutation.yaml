@@ -1,0 +1,408 @@
+agent:
+  system_template: |
+    You are a helpful assistant that can interact multiple times with a computer shell to solve programming tasks.
+    Your response must contain exactly ONE bash code block with ONE command (or commands connected with && or ||).
+
+    Only compile modified files; use incremental builds (e.g., `mvn compile -pl <module>`) rather
+    than full project rebuilds where possible.
+
+    Include a THOUGHT section before your command where you explain your reasoning process.
+    Format your response as shown in <format_example>.
+
+    <format_example>
+    THOUGHT: Your reasoning and analysis here
+
+    ```bash
+    your_command_here
+    ```
+    </format_example>
+
+    Failure to follow these rules will cause your response to be rejected.
+  instance_template: |
+    <repo_description>
+    The repository is at /testbed.
+    {{repo_description}}
+    </repo_description>
+
+    <locate_context>
+    The Locate module has analyzed the golden solution and the Fail-to-Pass (F2P) tests.
+    It restricted the mutation allowlist to files touched by the golden patch, parsed their
+    AST structure with Tree-sitter, and annotated the structural graph with the F2P execution
+    trace. Nodes marked [*] lie on the path executed by at least one F2P test and therefore
+    capture the bug-triggering logic. Prefer injecting bugs inside [*]-marked functions or
+    methods, as mutations there are more likely to cause F2P tests to fail.
+
+    {{locate_output}}
+    </locate_context>
+
+    <baseline_state_notice>
+    The current git state contains pre-applied code patches and test patches that form the BASELINE STATE.
+    - This baseline is intentionally constructed and must NOT be modified or reset
+    - DO NOT use: git clean, git checkout --, git reset, git stash
+    - All your changes must be ADDITIONAL to this baseline
+    - Your diff will be generated relative to this baseline (git diff HEAD)
+
+    When you see `git diff HEAD`, it shows ALL changes since the original commit, including
+    the pre-applied baseline patches. Focus only on the changes YOU make to {{allowed_files}}.
+
+    If the validator rejects with 'candidate_apply_failed', check your changes to {{allowed_files}}
+    for syntax errors, undefined variables, missing imports, or broken indentation — do not revert
+    the baseline patches.
+    </baseline_state_notice>
+
+    <mutation_goal>
+    The current repository contains the GOLDEN (fixed) solution. Your task is to introduce a
+    subtle, realistic, human-like bug into the allowed files only.
+
+    You MUST:
+    - Pick EXACTLY ONE strategy code from the current round's allowed strategies: {{allowed_strategies}}
+    - Keep the change minimal and idiomatic — it should look like a mistake the original developer
+      could plausibly have made
+    - Provide a concise explanation of why the chosen bug is difficult to detect
+    - Produce a valid unified git diff applicable with `git apply -p1`
+    - Do NOT modify tests or configuration files
+
+    The validator will accept your mutant if and only if:
+    - The repository compiles and runs without import or syntax errors
+    - At least one Fail-to-Pass (F2P) test fails on the mutated code
+
+    Do NOT simply revert the original fix described in repo_description. Introduce a DIFFERENT
+    subtle bug using your chosen strategy.
+    </mutation_goal>
+
+    <strategy_pool>
+    CURRENT ROUND: {{strategy_group}} ({{strategy_group_name}})
+    Choose EXACTLY ONE from: {{allowed_strategies}}
+
+    {% if strategy_group == "A" %}
+    A. Violation of API Specifications & Contracts
+    Alters expected API behaviors while keeping code syntactically valid. Surface-level tests
+    easily miss these violations.
+
+    - A1: Alter Parameter Default or Semantics
+      Modify a function's default parameter to a subtle but valid edge case, or alter the
+      internal logic that handles that parameter.
+      Example:
+        # Original:
+        def connect(host, timeout=10.0): ...
+        # Mutant (very aggressive default, passes fast tests, fails slow ones):
+        def connect(host, timeout=0.01): ...
+
+    - A2: Break API Signature or Convention
+      Swap the order of function parameters, causing failures for positional-argument callers
+      while passing keyword-argument callers.
+      Example:
+        # Original:
+        def log_event(event_type, metadata): ...
+        # Mutant:
+        def log_event(metadata, event_type): ...
+
+    - A3: Substitute Exception or Warning Type
+      Replace a specific exception type with a related one, fooling generic `except Exception`
+      handlers while breaking precise `except SpecificError` checks.
+      Example:
+        # Original:
+        raise ValueError("User ID must be positive.")
+        # Mutant:
+        raise TypeError("User ID must be a positive integer.")
+
+    - A4: Violation of Read-Only Contracts
+      Introduce side-effects into methods designed for query or validation purposes (getters,
+      validators). Breaks Command-Query Separation; causes data corruption on innocent reads.
+      Example:
+        # Original (pure validation):
+        def validate_user(user_data):
+            if 'temp_token' in user_data:
+                return check_token(user_data['temp_token'])
+            return True
+        # Mutant (modifies input dict):
+        def validate_user(user_data):
+            if user_data.pop('temp_token', None):
+                return True
+            return False
+
+    {% elif strategy_group == "B" %}
+    B. Manipulation of Boundaries & Conditional Logic
+    Subtle tweaks to comparisons or guards. Typical inputs pass; only edge cases expose the flaw.
+
+    - B1: Introduce Off-by-One Boundary Error
+      Change `>=` to `>` (or similar), passing tests with typical values but failing on the
+      exact boundary.
+      Example:
+        # Original:
+        if len(current_batch) >= MAX_BATCH_SIZE: flush_batch()
+        # Mutant:
+        if len(current_batch) > MAX_BATCH_SIZE: flush_batch()
+
+    - B2: Remove Null/Empty Case Handling
+      Delete pre-condition checks for None or empty collections, causing downstream errors
+      that simple tests do not trigger.
+      Example:
+        # Original:
+        def parse_date(ts):
+            if not ts: return None
+            return datetime.fromisoformat(ts)
+        # Mutant (crashes on None):
+        def parse_date(ts):
+            return datetime.fromisoformat(ts)
+
+    - B3: Invert Boolean Logic or Comparison
+      Flip `and` to `or` (or similar); not caught by tests that only use all-true or
+      all-false combinations.
+      Example:
+        # Original:
+        if user.is_admin and request.has_valid_token(): grant_access()
+        # Mutant:
+        if user.is_admin or request.has_valid_token(): grant_access()
+
+    {% elif strategy_group == "C" %}
+    C. Alteration of Type & Data Shape
+    Changes type handling or precision. Single-type checks and low-precision tests often miss these.
+
+    - C1: Break Implicit Type Coercion
+      Remove normalization code, causing failures for inputs that relied on implicit type
+      flexibility.
+      Example:
+        # Original:
+        def read_log(path):
+            path = str(path)  # accepts pathlib.Path
+            with open(path) as f: ...
+        # Mutant (fails with Path objects):
+        def read_log(path):
+            with open(path) as f: ...
+
+    - C2: Reduce Numerical Precision
+      Replace a high-precision operation (e.g., `math.isclose`, `Decimal`) with standard
+      float arithmetic that fails due to precision errors.
+      Example:
+        # Original:
+        total = Decimal(price) * Decimal(tax_rate)
+        # Mutant:
+        total = float(price) * float(tax_rate)
+
+    - C3: Confuse Text vs. Bytes Encoding
+      Remove an explicit `encoding` argument from I/O operations, relying on an unstable
+      system default.
+      Example:
+        # Original:
+        return json.loads(response.content.decode('utf-8'))
+        # Mutant:
+        return json.loads(response.content)
+
+    {% elif strategy_group == "D" %}
+    D. Violation of Stateful Logic & Sequences
+    Disrupts object states or call sequences. Single calls work; multi-step scenarios expose the flaw.
+
+    - D1: Break State Initialization or Reset
+      Incompletely initialize or clean up an object's state, causing failures in multi-step
+      test sequences.
+      Example:
+        # Original:
+        class Cache:
+            def clear(self): self._store.clear()
+        # Mutant (reference error — local reassignment only):
+        class Cache:
+            def clear(self): self._store = {}
+
+    - D2: Break Method Idempotency
+      Alter a method that should be safely repeatable so that a second call introduces an
+      unexpected side-effect.
+      Example:
+        # Original:
+        def add_listener(self, cb):
+            if cb not in self.listeners: self.listeners.append(cb)
+        # Mutant (allows duplicates):
+        def add_listener(self, cb):
+            self.listeners.append(cb)
+
+    - D3: Introduce Sequential Dependency
+      Remove a pre-condition check, making a method silently depend on another being called
+      first.
+      Example:
+        # Original:
+        def predict(self, X):
+            if not self.is_fitted: raise NotFittedError("Call fit() first")
+            return self.model.predict(X)
+        # Mutant (implicit crash):
+        def predict(self, X):
+            return self.model.predict(X)
+
+    - D4: Break Environment or Resource Handling
+      Remove or alter handling of environment variables, file paths, or external resources,
+      causing failures when the environment differs from test expectations.
+      Example:
+        # Original:
+        def get_config_path():
+            return os.path.join(os.getenv("CONFIG_DIR", "/etc"), "app.conf")
+        # Mutant (ignores CONFIG_DIR):
+        def get_config_path():
+            return "/etc/app.conf"
+
+    - D5: Structure Corruption
+      Modify a nested element of a complex data structure directly rather than on a copy.
+      The bug site is far from the crash site, mimicking subtle data-flow errors.
+      Example:
+        # Original:
+        def log_event(payload):
+            meta = payload.get("metadata", {}).copy()
+            meta["processed"] = True
+            logger.info(meta)
+        # Mutant (mutates the original object):
+        def log_event(payload):
+            payload["metadata"]["processed"] = True
+            logger.info(payload["metadata"])
+
+    - D6: Global State Contamination
+      Replace instance-level encapsulation with module-level or global variables, causing
+      execution history from one call to pollute the context for subsequent calls.
+      Example:
+        # Original:
+        class RateLimiter:
+            def __init__(self): self._counts = {}
+        # Mutant (shared across instances):
+        _GLOBAL_COUNTS = {}
+        class RateLimiter:
+            def __init__(self): self._counts = _GLOBAL_COUNTS
+
+    {% elif strategy_group == "E" %}
+    E. Test-Expectation Alignment
+    Creates deviations between behavior and test expectations. Core functionality stays intact,
+    but precise assertions fail.
+
+    - E1: Assertion Expectation Update
+      Change the code so it raises a different error type or message, invalidating precise
+      assertions in the golden test suite.
+      Example:
+        # Original:
+        if not found: raise NotFound("Resource not found")
+        # Mutant (fails tests asserting the exact message):
+        if not found: raise NotFound("The requested item does not exist")
+
+    - E2: Implicit to Explicit Parameter
+      Make an implicit behavior conditional on a new non-default parameter, breaking tests
+      that relied on the old implicit behavior.
+      Example:
+        # Original (always cleans up):
+        def cleanup_files(): os.remove(temp_path)
+        # Mutant (defaults to safe/no-op mode):
+        def cleanup_files(dry_run=True):
+            if not dry_run: os.remove(temp_path)
+
+    {% endif %}
+    </strategy_pool>
+
+    <constraints>
+    - MODIFY (strict allowlist): {{allowed_files}}
+    - DO NOT MODIFY: Any test files ({{test_files}}), configs, build or project settings
+    {% if test_cmd %}
+    - Test command: `{{test_cmd}}`
+    {% endif %}
+    - F2P list: derived from dataset metadata
+    </constraints>
+
+    <quality_guidelines>
+    Aim for a natural, minimal change aligned with your chosen strategy. Avoid:
+    - Explicit checks for specific test inputs or hardcoded test values
+    - Magic constants not justified by the existing code style
+    - Large rewrites or refactors
+    - Any modifications to test files
+    </quality_guidelines>
+
+    <output_requirement>
+    Submit strict JSON at the submission step:
+    {"diff": "<UNIFIED_PATCH_TEXT>", "explanation": "CHOSEN: <CODE>; <why this bug is hard to detect>"}
+
+    Requirements:
+    - "diff" is a valid unified patch (--- a/..., +++ b/...) touching ONLY allowed files
+    - Explanation MUST start with "CHOSEN: <CODE>" (e.g., "CHOSEN: B2")
+    </output_requirement>
+
+    <workflow>
+    1. Review the <locate_context> above — focus on [*]-marked functions and methods,
+       as they are on the F2P execution trace and are the most effective mutation targets
+    2. Explore the codebase: `git status`, `git log --oneline -5`
+    3. Read the [*]-marked sections of {{allowed_files}} in detail
+    4. Identify candidate injection points relevant to the chosen strategy group
+    5. Pick EXACTLY ONE strategy code from: {{allowed_strategies}}
+    6. Implement a minimal, idiomatic change in one of the allowed files
+    7. Verify syntax:
+       - Python: `python -m py_compile <file>` or `python3 -m py_compile <file>`
+       - Other languages: ensure no syntax errors, undefined variables, or broken indentation
+    8. Stage and review: `git add <file> && git diff --cached`
+    9. Submit the final JSON output
+    </workflow>
+
+    ## Command Execution
+    Each response must include:
+    1. A THOUGHT section
+    2. Exactly ONE bash code block
+
+    Commands run in a new subshell each time; environment changes are not persistent.
+    Prefix actions with `cd /testbed &&` when needed.
+
+    ## Submission
+    When done, submit your result:
+
+    ```bash
+    echo SWE_MUTATION_FINAL_OUTPUT && git add -A && git diff --cached > /tmp/patch.diff && DIFF_CONTENT=$(cat /tmp/patch.diff | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g') && echo "{\"diff\": \"$DIFF_CONTENT\", \"explanation\": \"CHOSEN: <CODE>; <explanation>\"}"
+    ```
+
+    Replace `<CODE>` with your chosen strategy (e.g., A1, B2) and fill in the explanation.
+  action_observation_template: |
+    <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
+    <output>
+    {{ output.output -}}
+    </output>
+    {%- else -%}
+    <warning>
+    The output of your last command was too long.
+    Please try a different command that produces less output.
+    If you're looking at a file you can try use head, tail or sed to view a smaller number of lines selectively.
+    If you're using grep or find and it produced too much output, you can use a more selective search pattern.
+    If you really need to see something from the full command's output, you can redirect output to a file and then search in that file.
+    </warning>
+    {%- set elided_chars = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided_chars>
+    {{ elided_chars }} characters elided
+    </elided_chars>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
+  format_error_template: |
+    Please always provide EXACTLY ONE action in triple backticks, found {{actions|length}} actions.
+
+    Please format your action in triple backticks as shown in <response_example>.
+
+    <response_example>
+    Here are some thoughts about why you want to perform the action.
+
+    ```bash
+    <action>
+    ```
+    </response_example>
+
+    If you have completed your assignment, please consult the first message about how to
+    submit your solution (you will not be able to continue working on this task after that).
+  step_limit: 100
+  cost_limit: 3.
+
+environment:
+  cwd: "/testbed"
+  timeout: 60
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: 'off'
+    TQDM_DISABLE: '1'
+
+model:
+  model_name: "claude-sonnet-4-20250514"
+  model_kwargs:
+    temperature: 0.0
+    drop_params: true
